@@ -4,7 +4,7 @@ A little weekender project to make a utility class for controlling some buttons 
 
 The driver and test rig for this project is what you see below.  A button panel from a salvaged video broadcast control unit of some sort (do you recognize this for the equipment from which it comes?).
 
-The buttons have clear-cap pop-offs where you can put printed mylar text under them and have backlit lamps.
+The buttons have clear-cap pop-offs where you can put laser/jet printed text on mylar film under them and have backlit lamps.
 
 The lamps in this case consume quite a bit of power (64mA each which totals about 1A when all are lit).
 
