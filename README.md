@@ -10,7 +10,7 @@ The lamps in this case consume quite a bit of power (64mA each which totals abou
 
 Feature wise, the class provides callback to your code for press down, press up, and hold events.  There is option to have class do the toggle on/off if that is all you need and get the callback on that event.  There are four button states : On, Off, Flash 1, and Flash 2.  Flash 2 is faster flashing than Flash 1.  The buttons are animated for positive feedback - you press them and the light inverts from off/on and visa versa.
 
-[Don't ask my why that op-amp is in the upper left corner of board, I don't know.  It isn't used.  I'd noted that it's output is linked to a driver transistor for about 300mA capacity output.]
+[Don't ask me why that op-amp is in the upper left corner of board, I don't know.  It isn't used.  I'd noted that it's output is linked to a driver transistor for about 300mA capacity output. Pins to this circuit are independant, on the blue connector but are not connected.]
 
 |Face|Board|
 |----|-----|
