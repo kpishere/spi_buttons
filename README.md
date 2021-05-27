@@ -9,3 +9,7 @@ The buttons have clear-cap pop-offs where you can put printed mylar text under t
 The lamps in this case consume quite a bit of power (64mA each which totals about 1A when all are lit).
 
 Feature wise, the class provides callback to your code for press down, press up, and hold events.  There is option to have class do the toggle on/off if that is all you need and get the callback on that event.  There are four button states : On, Off, Flash 1, and Flash 2.  Flash 2 is faster flashing than Flash 1.  The buttons are animated for positive feedback - you press them and the light inverts from off/on and visa versa.
+
+|Face|Board|
+|----|-----|
+|![IMG_3104](https://user-images.githubusercontent.com/25204173/119839212-01f25380-bed2-11eb-9abd-892c1008feb9.jpg)|![IMG_3102](https://user-images.githubusercontent.com/25204173/119839379-1fbfb880-bed2-11eb-9607-0ee061cb1d42.jpg)|
