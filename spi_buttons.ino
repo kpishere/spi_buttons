@@ -1,4 +1,4 @@
-#include "src/SPIButton.h"
+#include "SPIButton.h"
 
 #define SPIBUTTON_COUNT 20
 
