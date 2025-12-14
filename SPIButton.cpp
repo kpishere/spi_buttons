@@ -10,6 +10,9 @@ SPIButtonController::SPIButtonController(SPISettings spiSettings, uint8_t button
   _buttons = new SPIButton [_buttonCount];
 
   digitalWrite(SS,HIGH);
+
+  // Lamp strobe latch outpt enable always
+  pinMode(LAMP_LATCH_PIN, OUTPUT);
 };
 SPIButtonController::~SPIButtonController() {
   delete[] _buttons;
@@ -20,11 +23,15 @@ SPIButtonController::loop() {
 
   SPI.beginTransaction (_spiSettings);
 
+  digitalWrite(LAMP_LATCH_PIN, LOW);
+
   // LOW: Button serial read & Lights serial set off
   digitalWrite(SS, LOW);
   SPI.transfer(_xmitBuf, SPIBUTTON_BYTES(_buttonCount));
   getInputBuffer();
 
+  digitalWrite(LAMP_LATCH_PIN, HIGH);
+  
   // High: Button parallel read & Lights serial set on
   digitalWrite(SS, HIGH);
   setOutputBuffer();

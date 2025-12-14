@@ -13,6 +13,8 @@
 //  AU: kpishere 2021
 ////
 
+#define LAMP_LATCH_PIN 49
+
 // maximum press events in one callback (how many buttons pressed at once)
 #define SPIBUTTON_EVENTMAX 4
 

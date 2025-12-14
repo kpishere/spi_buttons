@@ -11,6 +11,20 @@
 // In a real application, you'd want to trigger the scanning by a timer trigger event.
 //
 // Au: kpishere 2021
+//
+// Wiring to Arduino MEGA 2560 for devince on Blue header 
+//   Note that other two connectors are the button switched outputs, the blue header is for 
+//   'remote' digital control and sensing.
+//
+// CLK  - Pin 52 - Button+Lamp Clock - Header pins 15,16
+// SS   - Pin 53 - Button P/S        - Header pin 14
+// MOSI - Pin 51 - Lamp              - Header pin 13
+// MISO - Pin 50 - Button            - Header pin 12
+//
+// GND - Header pin 2
+// PWR - Header pin 6 - Lamps
+// N/C - Header pin 10 - Op-amp output
+// Pin 49 - Header pin 11 - Lamp strobe latch output
 ////
 
 void mySPIButtonEventHandler(SPIButtonController &controller, SPIButtonEvent events) {
@@ -57,8 +71,8 @@ void setup() {
 
   Serial.begin(115200);
 
-  // 1 MHz clock, MSB first, mode 0
-  btnCtrl = new SPIButtonController(SPISettings(1E6, LSBFIRST, SPI_MODE0), SPIBUTTON_COUNT, xmit, &mySPIButtonEventHandler);
+  // 800 kHz clock, MSB first, mode 0 (1Mhz is too much on longer length bus)
+  btnCtrl = new SPIButtonController(SPISettings(8E5, LSBFIRST, SPI_MODE0), SPIBUTTON_COUNT, xmit, &mySPIButtonEventHandler);
 
   // Button config
   for(int i = 0; i < SPIBUTTON_COUNT; i++) btnCtrl->setButton(i,defaultButton);
