@@ -1,0 +1,7 @@
+[package]
+name = "spi_buttons_rust"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+pru = "0.1"
