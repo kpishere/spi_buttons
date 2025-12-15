@@ -1,7 +1,10 @@
-use pru;
+use libc;
 use std::fs;
 use std::thread;
 use std::time::Duration;
+use std::os::unix::io::AsRawFd;
+
+static PRU_FIRMWARE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/pru-spi-master.bin"));
 
 const PRU_DATA_BUFFER_SIZE: usize = 0x400;
 
@@ -125,21 +128,41 @@ impl SPIButton {
 type SPIButtonEvents = Vec<SPIButton>;
 
 struct SPIButtonController {
-    pru: pru::Pru,
-    context: *mut PruSpiContext,
     button_count: usize,
     buttons: Vec<SPIButton>,
     xmit_buf: Vec<u8>,
     scans: u32,
     latch_pin: u32,
+    context: *mut PruSpiContext,
 }
 
 impl SPIButtonController {
     fn new(button_count: usize) -> Result<Self, Box<dyn std::error::Error>> {
-        let pru = pru::Pru::new()?;
-        pru.load_firmware("pru-spi-master.bin")?;
-        pru.run();
-        let context = pru.map_ram(0, std::mem::size_of::<PruSpiContext>()) as *mut PruSpiContext;
+        // Write PRU firmware to /lib/firmware
+        let firmware_path = "/lib/firmware/pru-spi-master.bin";
+        fs::write(firmware_path, PRU_FIRMWARE)?;
+
+        // Load PRU firmware
+        fs::write("/sys/class/remoteproc/remoteproc1/firmware", "pru-spi-master.bin")?;
+        fs::write("/sys/class/remoteproc/remoteproc1/state", "start")?;
+
+        // Mmap PRU shared memory (PRU-ICSS Shared RAM at 0x4a310000 for PRU0)
+        let mem_fd = fs::OpenOptions::new().read(true).write(true).open("/dev/mem")?;
+        let shared_ram_addr = 0x4a310000;
+        let shared_ram_size = 0x2000; // 8KB
+        let context = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                shared_ram_size,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_SHARED,
+                mem_fd.as_raw_fd(),
+                shared_ram_addr as libc::off_t,
+            ) as *mut PruSpiContext
+        };
+        if context.is_null() {
+            return Err("Failed to mmap PRU shared memory".into());
+        }
 
         let bytes = (button_count + 7) / 8;
         let xmit_buf = vec![0; bytes];
@@ -150,13 +173,12 @@ impl SPIButtonController {
         Self::setup_gpio(latch_pin)?;
 
         Ok(SPIButtonController {
-            pru,
-            context,
             button_count,
             buttons,
             xmit_buf,
             scans: 0,
             latch_pin,
+            context,
         })
     }
     fn setup_gpio(pin: u32) -> Result<(), Box<dyn std::error::Error>> {
@@ -182,7 +204,7 @@ impl SPIButtonController {
         }
         let mut rx = vec![0; len];
         unsafe {
-            std::ptr::copy_nonoverlapping((*self.context).buffers.as_ptr(), rx.as_mut_ptr(), len);
+            std::ptr::copy_nonoverlapping((*self.context).buffers.as_ptr().add(PRU_DATA_BUFFER_SIZE), rx.as_mut_ptr(), len);
         }
         Ok(rx)
     }
@@ -265,12 +287,14 @@ impl SPIButtonController {
 
     fn loop_once(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let mut events = SPIButtonEvents::new();
+        let xmit_data = self.xmit_buf.clone();
         Self::set_gpio(self.latch_pin, false)?; // Latch low to read buttons
-        let rx_buf = self.transfer(&self.xmit_buf)?;
+        let rx_buf = self.transfer(&xmit_data)?;
         self.get_input_buffer(&rx_buf, &mut events);
         Self::set_gpio(self.latch_pin, true)?;  // Latch high to end read 
         self.set_output_buffer(); // Update for lights
-        let _ = self.transfer(&self.xmit_buf)?;
+        let xmit_data2 = self.xmit_buf.clone();
+        let _ = self.transfer(&xmit_data2)?;
         for i in 0..events.len() {
             let b = events[i];
             println!("Button {}: State {:?}", b.id, b.get_state());
