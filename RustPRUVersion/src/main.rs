@@ -138,16 +138,36 @@ struct SPIButtonController {
 
 impl SPIButtonController {
     fn new(button_count: usize) -> Result<Self, Box<dyn std::error::Error>> {
-        // Write PRU firmware to /lib/firmware
-        let firmware_path = "/lib/firmware/pru-spi-master.bin";
-        fs::write(firmware_path, PRU_FIRMWARE)?;
+        // Stop PRU if running
+        let _ = fs::write("/sys/class/remoteproc/remoteproc1/state", "stop");
 
-        // Load PRU firmware
-        fs::write("/sys/class/remoteproc/remoteproc1/firmware", "pru-spi-master.bin")?;
+        // Mmap PRU IRAM (PRU0 Instruction RAM at 0x4a334000)
+        let mem_fd = fs::OpenOptions::new().read(true).write(true).open("/dev/mem")?;
+        let iram_addr = 0x4a334000;
+        let iram_size = 0x2000; // 8KB
+        let iram = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                iram_size,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_SHARED,
+                mem_fd.as_raw_fd(),
+                iram_addr as libc::off_t,
+            )
+        };
+        if iram.is_null() {
+            return Err("Failed to mmap PRU IRAM".into());
+        }
+
+        // Copy firmware to PRU IRAM
+        unsafe {
+            std::ptr::copy_nonoverlapping(PRU_FIRMWARE.as_ptr(), iram as *mut u8, PRU_FIRMWARE.len());
+        }
+
+        // Start PRU
         fs::write("/sys/class/remoteproc/remoteproc1/state", "start")?;
 
         // Mmap PRU shared memory (PRU-ICSS Shared RAM at 0x4a310000 for PRU0)
-        let mem_fd = fs::OpenOptions::new().read(true).write(true).open("/dev/mem")?;
         let shared_ram_addr = 0x4a310000;
         let shared_ram_size = 0x2000; // 8KB
         let context = unsafe {
