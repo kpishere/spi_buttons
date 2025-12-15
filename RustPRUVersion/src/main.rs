@@ -122,24 +122,7 @@ impl SPIButton {
     }
 }
 
-struct SPIButtonEvent {
-    events: Vec<SPIButton>,
-    count: usize,
-}
-
-impl SPIButtonEvent {
-    fn new() -> Self {
-        SPIButtonEvent {
-            events: Vec::new(),
-            count: 0,
-        }
-    }
-
-    fn add(&mut self, button: SPIButton) {
-        self.events.push(button);
-        self.count += 1;
-    }
-}
+type SPIButtonEvents = Vec<SPIButton>;
 
 struct SPIButtonController {
     pru: pru::Pru,
@@ -153,7 +136,7 @@ struct SPIButtonController {
 
 impl SPIButtonController {
     fn new(button_count: usize) -> Result<Self, Box<dyn std::error::Error>> {
-        let pru = pru::Pru::new(0)?;
+        let pru = pru::Pru::new()?;
         pru.load_firmware("pru-spi-master.bin")?;
         pru.run();
         let context = pru.map_ram(0, std::mem::size_of::<PruSpiContext>()) as *mut PruSpiContext;
@@ -167,7 +150,7 @@ impl SPIButtonController {
         Self::setup_gpio(latch_pin)?;
 
         Ok(SPIButtonController {
-            pruss,
+            pru,
             context,
             button_count,
             buttons,
@@ -248,7 +231,7 @@ impl SPIButtonController {
         }
     }
 
-    fn get_input_buffer(&mut self, received: &[u8], event: &mut SPIButtonEvent) {
+    fn get_input_buffer(&mut self, received: &[u8], events: &mut SPIButtonEvents) {
         const SCANS_ISHOLD: u32 = 10;
 
         for b in 0..self.button_count {
@@ -265,11 +248,11 @@ impl SPIButtonController {
 
             if btn.on_change() && (is_down || is_up) {
                 btn.set_hold_event(false);
-                event.add(btn);
+                events.push(btn);
             }
             if btn.on_hold() && is_hold {
                 btn.set_hold_event(true);
-                event.add(btn);
+                events.push(btn);
             }
 
             if btn.do_toggle() && is_down {
@@ -281,33 +264,27 @@ impl SPIButtonController {
     }
 
     fn loop_once(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        rx_buf = self.transfer(&self.xmit_buf)?;
-        self.get_input_buffer(&rx_buf, &mut event);
-        // HIGH: Button parallel read & Lights serial set on
-        Self::set_gpio(self.latch_pin, true)?;
+        let mut events = SPIButtonEvents::new();
+        Self::set_gpio(self.latch_pin, false)?; // Latch low to read buttons
+        let rx_buf = self.transfer(&self.xmit_buf)?;
+        self.get_input_buffer(&rx_buf, &mut events);
+        Self::set_gpio(self.latch_pin, true)?;  // Latch high to end read 
         self.set_output_buffer(); // Update for lights
         let _ = self.transfer(&self.xmit_buf)?;
-        // HIGH: Button parallel read & Lights serial set on
-        Self::set_gpio(self.latch_pin, true)?;
-        let mut transfer2 = SpidevTransfer::read_write(&self.xmit_buf, rx_buf.as_mut_slice());
-        self.spi.transfer(&mut transfer2).unwrap();
-        self.set_output_buffer(); // Update for lights
-        if event.count > 0 {
-            for i in 0..event.count {
-                let b = event.events[i];
-                println!("Button {}: State {:?}", b.id, b.get_state());
-                if b.is_hold_event() {
-                    let mut btn = self.get_button(b.id as usize);
-                    match btn.get_state() {
-                        SPIButtonState::Off => btn.set_state(SPIButtonState::On),
-                        SPIButtonState::On => btn.set_state(SPIButtonState::Flash1),
-                        SPIButtonState::Flash1 => btn.set_state(SPIButtonState::Flash2),
-                        SPIButtonState::Flash2 => btn.set_state(SPIButtonState::Off),
-                        _ => {}
-                    }
-                    btn.scans_pressed = 0;
-                    self.set_button(b.id as usize, btn);
+        for i in 0..events.len() {
+            let b = events[i];
+            println!("Button {}: State {:?}", b.id, b.get_state());
+            if b.is_hold_event() {
+                let mut btn = self.get_button(b.id as usize);
+                match btn.get_state() {
+                    SPIButtonState::Off => btn.set_state(SPIButtonState::On),
+                    SPIButtonState::On => btn.set_state(SPIButtonState::Flash1),
+                    SPIButtonState::Flash1 => btn.set_state(SPIButtonState::Flash2),
+                    SPIButtonState::Flash2 => btn.set_state(SPIButtonState::Off),
+                    _ => {}
                 }
+                btn.scans_pressed = 0;
+                self.set_button(b.id as usize, btn);
             }
         }
         self.scans += 1;
