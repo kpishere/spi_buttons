@@ -1,8 +1,7 @@
-use libc;
+use prusst;
 use std::fs;
 use std::thread;
 use std::time::Duration;
-use std::os::unix::io::AsRawFd;
 
 static PRU_FIRMWARE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/pru-spi-master.bin"));
 
@@ -133,56 +132,24 @@ struct SPIButtonController {
     xmit_buf: Vec<u8>,
     scans: u32,
     latch_pin: u32,
+    pru: prusst::Pru,
     context: *mut PruSpiContext,
 }
 
 impl SPIButtonController {
     fn new(button_count: usize) -> Result<Self, Box<dyn std::error::Error>> {
-        // Stop PRU if running
-        let _ = fs::write("/sys/class/remoteproc/remoteproc1/state", "stop");
+        let mut subsystem = prusst::PruSubsystem::new()?;
+        let mut pru = subsystem.pru(0)?;
 
-        // Mmap PRU IRAM (PRU0 Instruction RAM at 0x4a334000)
-        let mem_fd = fs::OpenOptions::new().read(true).write(true).open("/dev/mem")?;
-        let iram_addr = 0x4a334000;
-        let iram_size = 0x2000; // 8KB
-        let iram = unsafe {
-            libc::mmap(
-                std::ptr::null_mut(),
-                iram_size,
-                libc::PROT_READ | libc::PROT_WRITE,
-                libc::MAP_SHARED,
-                mem_fd.as_raw_fd(),
-                iram_addr as libc::off_t,
-            )
-        };
-        if iram.is_null() {
-            return Err("Failed to mmap PRU IRAM".into());
-        }
-
-        // Copy firmware to PRU IRAM
-        unsafe {
-            std::ptr::copy_nonoverlapping(PRU_FIRMWARE.as_ptr(), iram as *mut u8, PRU_FIRMWARE.len());
-        }
+        // Write firmware to PRU IRAM
+        pru.write_iram(0, PRU_FIRMWARE)?;
 
         // Start PRU
-        fs::write("/sys/class/remoteproc/remoteproc1/state", "start")?;
+        pru.start()?;
 
-        // Mmap PRU shared memory (PRU-ICSS Shared RAM at 0x4a310000 for PRU0)
-        let shared_ram_addr = 0x4a310000;
-        let shared_ram_size = 0x2000; // 8KB
-        let context = unsafe {
-            libc::mmap(
-                std::ptr::null_mut(),
-                shared_ram_size,
-                libc::PROT_READ | libc::PROT_WRITE,
-                libc::MAP_SHARED,
-                mem_fd.as_raw_fd(),
-                shared_ram_addr as libc::off_t,
-            ) as *mut PruSpiContext
-        };
-        if context.is_null() {
-            return Err("Failed to mmap PRU shared memory".into());
-        }
+        // Get shared RAM
+        let shared_ram = pru.shared_ram_mut();
+        let context = shared_ram.as_mut_ptr() as *mut PruSpiContext;
 
         let bytes = (button_count + 7) / 8;
         let xmit_buf = vec![0; bytes];
@@ -198,6 +165,7 @@ impl SPIButtonController {
             xmit_buf,
             scans: 0,
             latch_pin,
+            pru,
             context,
         })
     }

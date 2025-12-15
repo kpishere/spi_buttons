@@ -9,8 +9,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37c93d8daa9d8a012fd8ab92f088405fb202ea0b6ab73ee2482ae66af4f42091"
 
 [[package]]
+name = "prusst"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dd83c07db260cf3a044a28e0c5ef3e4abaa876e31dea6123952a75dbad6b22d2"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "spi_buttons_rust"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "prusst",
 ]
