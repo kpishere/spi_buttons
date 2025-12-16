@@ -4,4 +4,4 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-prusst = "1.0"
+prusst = { git = "https://github.com/kpishere/prusst.git" }

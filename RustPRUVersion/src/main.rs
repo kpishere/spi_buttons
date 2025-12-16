@@ -1,4 +1,6 @@
-use prusst;
+extern crate prusst;
+
+use prusst::{Pruss, IntcConfig};
 use std::fs;
 use std::thread;
 use std::time::Duration;
@@ -126,29 +128,28 @@ impl SPIButton {
 
 type SPIButtonEvents = Vec<SPIButton>;
 
-struct SPIButtonController {
+struct SPIButtonController<'a> {
     button_count: usize,
     buttons: Vec<SPIButton>,
     xmit_buf: Vec<u8>,
     scans: u32,
     latch_pin: u32,
-    pru: prusst::Pru,
+    pru: prusst::Pruss<'a>,
     context: *mut PruSpiContext,
 }
 
-impl SPIButtonController {
+impl SPIButtonController<'_> {
     fn new(button_count: usize) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut subsystem = prusst::PruSubsystem::new()?;
-        let mut pru = subsystem.pru(0)?;
-
+        let mut subsystem = Pruss::new(&IntcConfig::new_populated())?;
+	
         // Write firmware to PRU IRAM
-        pru.write_iram(0, PRU_FIRMWARE)?;
+	let mut pru = subsystem.pru0.load_object( PRU_FIRMWARE)?;
 
         // Start PRU
-        pru.start()?;
+        pru.run();
 
         // Get shared RAM
-        let shared_ram = pru.shared_ram_mut();
+        let shared_ram = subsystem.shared_ram_mut();
         let context = shared_ram.as_mut_ptr() as *mut PruSpiContext;
 
         let bytes = (button_count + 7) / 8;
@@ -165,7 +166,7 @@ impl SPIButtonController {
             xmit_buf,
             scans: 0,
             latch_pin,
-            pru,
+            pru: subsystem,
             context,
         })
     }
