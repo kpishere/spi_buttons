@@ -1,21 +1,14 @@
 extern crate prusst;
 
-use prusst::{Pruss, IntcConfig};
+use prusst::{IntcConfig, Pruss, Evtout, EvtoutIrq};
 use std::fs;
+use std::io::Cursor;
 use std::thread;
+use std::result::Result as StdResult;
 use std::time::Duration;
+use rounded_div;
 
 static PRU_FIRMWARE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/pru-spi-master.bin"));
-
-const PRU_DATA_BUFFER_SIZE: usize = 0x400;
-
-#[repr(C)]
-struct PruSpiContext {
-    buffers: [u8; PRU_DATA_BUFFER_SIZE * 2],
-    buffer: u32,
-    length: u32,
-    slave_max_transmission_length: u32,
-}
 
 #[derive(Clone, Copy, Debug)]
 #[repr(u8)]
@@ -134,24 +127,20 @@ struct SPIButtonController<'a> {
     xmit_buf: Vec<u8>,
     scans: u32,
     latch_pin: u32,
-    pru: prusst::Pruss<'a>,
-    context: *mut PruSpiContext,
+    pru: Pruss<'a>,
+    events: EvtoutIrq,
 }
 
-impl SPIButtonController<'_> {
-    fn new(button_count: usize) -> Result<Self, Box<dyn std::error::Error>> {
+impl<'a> SPIButtonController<'a> {
+    fn new(button_count: usize) -> StdResult<Self, Box<dyn std::error::Error>> {
         let mut subsystem = Pruss::new(&IntcConfig::new_populated())?;
-	
+        let events = subsystem.intc.register_irq(Evtout::E0);
+
         // Write firmware to PRU IRAM
-	let mut pru = subsystem.pru0.load_object( PRU_FIRMWARE)?;
+        let mut loader = subsystem.pru0.load_code(&mut Cursor::new(PRU_FIRMWARE))?;
 
         // Start PRU
-        pru.run();
-
-        // Get shared RAM
-        let shared_ram = subsystem.shared_ram_mut();
-        let context = shared_ram.as_mut_ptr() as *mut PruSpiContext;
-
+        unsafe { loader.run(); }
         let bytes = (button_count + 7) / 8;
         let xmit_buf = vec![0; bytes];
         let buttons = vec![SPIButton::new(SPIButtonState::Off); button_count];
@@ -167,33 +156,32 @@ impl SPIButtonController<'_> {
             scans: 0,
             latch_pin,
             pru: subsystem,
-            context,
+            events,
         })
     }
-    fn setup_gpio(pin: u32) -> Result<(), Box<dyn std::error::Error>> {
+    fn setup_gpio(pin: u32) -> StdResult<(), Box<dyn std::error::Error>> {
         fs::write("/sys/class/gpio/export", pin.to_string())?;
         fs::write(format!("/sys/class/gpio/gpio{}/direction", pin), "out")?;
         Ok(())
     }
 
-    fn set_gpio(pin: u32, value: bool) -> Result<(), Box<dyn std::error::Error>> {
+    fn set_gpio(pin: u32, value: bool) -> StdResult<(), Box<dyn std::error::Error>> {
         fs::write(format!("/sys/class/gpio/gpio{}/value", pin), if value { "1" } else { "0" })?;
         Ok(())
     }
-    fn transfer(&mut self, data: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        let len = data.len();
+    fn transfer(&mut self, data: &[u8]) -> StdResult<Vec<u8>, Box<dyn std::error::Error>> {
+        let ulen = 1 + rounded_div::usize(data.len(), std::mem::size_of::<usize>());
+        let context = self.pru.dram0.alloc(ulen);
         unsafe {
-            (*self.context).length = len as u32;
-            (*self.context).buffer = 0;
-            std::ptr::copy_nonoverlapping(data.as_ptr(), (*self.context).buffers.as_mut_ptr(), len);
+            std::ptr::copy_nonoverlapping(data.as_ptr() as *const usize, context, ulen);
         }
         // Wait for PRU to complete
-        while unsafe { (*self.context).length } != 0 {
+        while self.events.wait() != 0 {
             thread::sleep(Duration::from_micros(10));
         }
-        let mut rx = vec![0; len];
+        let mut rx = vec![0; data.len()];
         unsafe {
-            std::ptr::copy_nonoverlapping((*self.context).buffers.as_ptr().add(PRU_DATA_BUFFER_SIZE), rx.as_mut_ptr(), len);
+            std::ptr::copy_nonoverlapping(context, rx.as_mut_ptr() as *mut usize, ulen);
         }
         Ok(rx)
     }
@@ -305,7 +293,7 @@ impl SPIButtonController<'_> {
     }
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> StdResult<(), Box<dyn std::error::Error>> {
     println!("Initializing SPI Buttons Controller on Beaglebone Black...");
 
     let mut controller = SPIButtonController::new(20)?;

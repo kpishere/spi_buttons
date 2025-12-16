@@ -5,3 +5,4 @@ edition = "2021"
 
 [dependencies]
 prusst = { git = "https://github.com/kpishere/prusst.git" }
+rounded-div = "0.1.4"
