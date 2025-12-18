@@ -1,14 +1,5 @@
-extern crate prusst;
-
-use prusst::{IntcConfig, Pruss, Evtout, EvtoutIrq};
+use spidev::{Spidev, SpidevOptions, SpiModeFlags, SpidevTransfer};
 use std::fs;
-use std::io::Cursor;
-use std::thread;
-use std::result::Result as StdResult;
-use std::time::Duration;
-use rounded_div;
-
-static PRU_FIRMWARE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/pru-spi-master.bin"));
 
 #[derive(Clone, Copy, Debug)]
 #[repr(u8)]
@@ -121,26 +112,25 @@ impl SPIButton {
 
 type SPIButtonEvents = Vec<SPIButton>;
 
-struct SPIButtonController<'a> {
+struct SPIButtonController {
+    spi: Spidev,
     button_count: usize,
     buttons: Vec<SPIButton>,
     xmit_buf: Vec<u8>,
     scans: u32,
     latch_pin: u32,
-    pru: Pruss<'a>,
-    events: EvtoutIrq,
 }
 
-impl<'a> SPIButtonController<'a> {
-    fn new(button_count: usize) -> StdResult<Self, Box<dyn std::error::Error>> {
-        let mut subsystem = Pruss::new(&IntcConfig::new_populated())?;
-        let events = subsystem.intc.register_irq(Evtout::E0);
+impl SPIButtonController {
+    fn new(button_count: usize) -> Result<Self, Box<dyn std::error::Error>> {
+        let mut spi = Spidev::open("/dev/spidev1.0")?;
+        let options = SpidevOptions::new()
+            .bits_per_word(8)
+            .max_speed_hz(1_000_000)
+            .mode(SpiModeFlags::SPI_MODE_0)
+            .build();
+        spi.configure(&options)?;
 
-        // Write firmware to PRU IRAM
-        let mut loader = subsystem.pru0.load_code(&mut Cursor::new(PRU_FIRMWARE))?;
-
-        // Start PRU
-        unsafe { loader.run(); }
         let bytes = (button_count + 7) / 8;
         let xmit_buf = vec![0; bytes];
         let buttons = vec![SPIButton::new(SPIButtonState::Off); button_count];
@@ -150,40 +140,29 @@ impl<'a> SPIButtonController<'a> {
         Self::setup_gpio(latch_pin)?;
 
         Ok(SPIButtonController {
+            spi,
             button_count,
             buttons,
             xmit_buf,
             scans: 0,
             latch_pin,
-            pru: subsystem,
-            events,
         })
     }
-    fn setup_gpio(pin: u32) -> StdResult<(), Box<dyn std::error::Error>> {
+    fn setup_gpio(pin: u32) -> Result<(), Box<dyn std::error::Error>> {
         fs::write("/sys/class/gpio/export", pin.to_string())?;
         fs::write(format!("/sys/class/gpio/gpio{}/direction", pin), "out")?;
         Ok(())
     }
 
-    fn set_gpio(pin: u32, value: bool) -> StdResult<(), Box<dyn std::error::Error>> {
+    fn set_gpio(pin: u32, value: bool) -> Result<(), Box<dyn std::error::Error>> {
         fs::write(format!("/sys/class/gpio/gpio{}/value", pin), if value { "1" } else { "0" })?;
         Ok(())
     }
-    fn transfer(&mut self, data: &[u8]) -> StdResult<Vec<u8>, Box<dyn std::error::Error>> {
-        let ulen = 1 + rounded_div::usize(data.len(), std::mem::size_of::<usize>());
-        let context = self.pru.dram0.alloc(ulen);
-        unsafe {
-            std::ptr::copy_nonoverlapping(data.as_ptr() as *const usize, context, ulen);
-        }
-        // Wait for PRU to complete
-        while self.events.wait() != 0 {
-            thread::sleep(Duration::from_micros(10));
-        }
-        let mut rx = vec![0; data.len()];
-        unsafe {
-            std::ptr::copy_nonoverlapping(context, rx.as_mut_ptr() as *mut usize, ulen);
-        }
-        Ok(rx)
+    fn transfer(&mut self, data: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        let mut rx_buf = vec![0u8; data.len()];
+        let mut transfer = SpidevTransfer::read_write(data, rx_buf.as_mut_slice());
+        self.spi.transfer(&mut transfer)?;
+        Ok(rx_buf)
     }
 
     fn set_button(&mut self, pos: usize, mut button: SPIButton) {
@@ -293,7 +272,7 @@ impl<'a> SPIButtonController<'a> {
     }
 }
 
-fn main() -> StdResult<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Initializing SPI Buttons Controller on Beaglebone Black...");
 
     let mut controller = SPIButtonController::new(20)?;

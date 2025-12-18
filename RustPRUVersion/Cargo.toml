@@ -4,5 +4,5 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-prusst = { git = "https://github.com/kpishere/prusst.git" }
+spidev = "0.5"
 rounded-div = "0.1.4"
