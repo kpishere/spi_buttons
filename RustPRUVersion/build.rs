@@ -1,8 +1,9 @@
-use std::process::Command;
-use std::path::Path;
-use std::env;
+//use std::process::Command;
+//use std::path::Path;
+//use std::env;
 
 fn main() {
+/*
     // Rerun if PRU source files or main.rs change
     println!("cargo:rerun-if-changed=pru-spi-master.p");
     println!("cargo:rerun-if-changed=pru-spi-common.ph");
@@ -34,4 +35,5 @@ fn main() {
     } else {
         panic!("pru-spi-master.bin not found after compilation");
     }
+ */
 }

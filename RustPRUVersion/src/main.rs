@@ -1,8 +1,6 @@
 use spidev::{Spidev, SpidevOptions, SpiModeFlags, SpidevTransfer};
-use std::fs::File;
 use std::ptr;
-use std::os::fd::AsRawFd;
-use libc;
+use std::ffi::CString;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(u8)]
@@ -131,7 +129,7 @@ impl SPIButtonController {
         let mut spi = Spidev::open("/dev/spidev1.0")?;
         let options = SpidevOptions::new()
             .bits_per_word(8)
-            .max_speed_hz(1_000_000)
+            .max_speed_hz(800_000)
             .mode(SpiModeFlags::SPI_MODE_0)
             .build();
         spi.configure(&options)?;
@@ -140,8 +138,8 @@ impl SPIButtonController {
         let xmit_buf = vec![0; bytes];
         let buttons = vec![SPIButton::new(SPIButtonState::Off); button_count];
 
-        // LAMP_LATCH_PIN equivalent: P8_10 GPIO68
-        let latch_pin = 68;
+        // LAMP_LATCH_PIN equivalent: P8_19 GPIO22
+        let latch_pin = 22;
         let (setdata, clrdata, pin_bit) = Self::setup_gpio_mem(latch_pin)?;
 
         Ok(SPIButtonController {
@@ -160,32 +158,38 @@ impl SPIButtonController {
         let bit = pin % 32;
         let pin_bit = 1 << bit;
         let base_addr = match bank {
-            0 => 0x44E07000,
-            1 => 0x4804C000,
-            2 => 0x481AC000,
-            3 => 0x481AE000,
+            0 => 0x44E0_7000,
+            1 => 0x4804_C000,
+            2 => 0x481A_C000,
+            3 => 0x481A_E000,
             _ => return Err("Invalid GPIO bank".into()),
         };
+        let reg_size = 0x1000;
 
-        let mem_file = File::open("/dev/mem")?;
-        let mem_fd = mem_file.as_raw_fd();
+        let mem_file = CString::new("/dev/mem").unwrap();
+        let mem_fd = unsafe { libc::open(mem_file.as_ptr(), libc::O_RDWR) };
+        if mem_fd < 0 {
+            panic!("Cannot open memory device");
+        }
         let gpio_base = unsafe {
             libc::mmap(
                 std::ptr::null_mut(),
-                0x1000,
+                reg_size,
                 libc::PROT_READ | libc::PROT_WRITE,
                 libc::MAP_SHARED,
                 mem_fd,
-                base_addr as i32,
+                base_addr,
             ) as *mut u8
         };
         if gpio_base == libc::MAP_FAILED as *mut u8 {
             return Err("mmap failed".into());
         }
-
-        let oe = (gpio_base as usize + 0x134) as *mut u32;
-        let setdata = (gpio_base as usize + 0x194) as *mut u32;
-        let clrdata = (gpio_base as usize + 0x190) as *mut u32;
+        let gpio_oe_register: isize = 0x134;
+	let gpio_setdata: isize = 0x194;
+        let gpio_clrdata: isize = 0x190;
+        let oe = unsafe { gpio_base.offset(gpio_oe_register) as *mut u32};
+        let setdata = unsafe { gpio_base.offset(gpio_setdata) as *mut u32};
+        let clrdata = unsafe { gpio_base.offset(gpio_clrdata) as *mut u32};
 
         // Set direction to output
         unsafe {
