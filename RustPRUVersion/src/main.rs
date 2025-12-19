@@ -176,7 +176,7 @@ impl SPIButtonController {
                 libc::PROT_READ | libc::PROT_WRITE,
                 libc::MAP_SHARED,
                 mem_fd,
-                base_addr as i64,
+                base_addr as i32,
             ) as *mut u8
         };
         if gpio_base == libc::MAP_FAILED as *mut u8 {
