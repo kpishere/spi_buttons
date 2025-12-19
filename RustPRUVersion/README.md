@@ -4,7 +4,7 @@ This is a Rust re-implementation of the spi_buttons repository for Beaglebone Bl
 
 ## Overview
 
-The original project controls buttons with lights using SPI shift registers. This version implements the same logic in Rust, using the `spidev` library for SPI communication via the Linux SPI device driver. GPIO is used for the latch pin to control shift register parallel loading.
+The original project controls buttons with lights using SPI shift registers. This version implements the same logic in Rust, using the `spidev` library for SPI communication via the Linux SPI device driver. GPIO is used for the latch pin to control shift register parallel loading, accessed directly via memory-mapped I/O for improved performance.
 
 ## SPI Implementation
 
@@ -31,7 +31,7 @@ Shift Register Connections:
 - Serial Data Out -> MISO (P8_15)
 - Chip Select     <- CS (P9_28)
 
-Note: SPI pins are managed by the Linux SPI driver; GPIO68 is controlled via sysfs.
+Note: SPI pins are managed by the Linux SPI driver; GPIO68 is controlled via direct memory-mapped I/O access to /dev/mem.
 ```
 
 ### SPI Pins Description
@@ -40,11 +40,24 @@ Note: SPI pins are managed by the Linux SPI driver; GPIO68 is controlled via sys
 - **SCK (P8_12, SPI1_SCLK)**: Provides the clock signal for synchronizing data transfer.
 - **MISO (P8_15, SPI1_D0)**: Reads serial data from the shift registers' data output.
 - **CS (P9_28, SPI1_CS0)**: Chip select signal to enable/disable SPI communication.
-- **Lamp Latch (P8_10, GPIO68)**: GPIO-controlled pin to latch data into the shift registers for parallel output.
+- **Lamp Latch (P8_10, GPIO68)**: GPIO-controlled pin to latch data into the shift registers for parallel output, accessed via direct memory mapping of GPIO registers.
+
+## GPIO Access
+
+GPIO control has been updated to use direct memory-mapped I/O access via `/dev/mem` instead of the sysfs interface. This provides:
+
+- Lower latency for GPIO operations
+- Direct access to GPIO registers (GPIO_OE, GPIO_SETDATAOUT, GPIO_CLEARDATAOUT)
+- Atomic set/clear operations for better performance
+- Reduced overhead compared to file system operations
+
+The implementation maps the GPIO2 bank (containing GPIO68) and directly manipulates the hardware registers for pin control.
 
 ## Dependencies
 
 - `spidev`: For SPI communication via the Linux SPI device interface.
+- `nix`: For system call wrappers (used for GPIO memory mapping).
+- `libc`: For direct system calls including mmap.
 
 ## Building
 
@@ -56,9 +69,17 @@ To build the project:
 cargo build
 ```
 
+## Testing
+
+Run the unit tests to verify the button logic:
+
+```bash
+cargo test
+```
+
 ## Running
 
 1. Build the Rust program: `cargo build`
-2. Run as root (for GPIO access): `sudo cargo run`
+2. Run as root (for /dev/mem access): `sudo cargo run`
 
-The program uses the SPI device at `/dev/spidev1.0` and GPIO68 for latch control.
+The program uses the SPI device at `/dev/spidev1.0` and GPIO68 for latch control via direct memory mapping.

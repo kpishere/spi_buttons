@@ -1,7 +1,10 @@
 use spidev::{Spidev, SpidevOptions, SpiModeFlags, SpidevTransfer};
-use std::fs;
+use std::fs::File;
+use std::ptr;
+use std::os::fd::AsRawFd;
+use libc;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(u8)]
 enum SPIButtonState {
     Off = 0x00,
@@ -118,7 +121,9 @@ struct SPIButtonController {
     buttons: Vec<SPIButton>,
     xmit_buf: Vec<u8>,
     scans: u32,
-    latch_pin: u32,
+    setdata: *mut u32,
+    clrdata: *mut u32,
+    pin_bit: u32,
 }
 
 impl SPIButtonController {
@@ -137,7 +142,7 @@ impl SPIButtonController {
 
         // LAMP_LATCH_PIN equivalent: P8_10 GPIO68
         let latch_pin = 68;
-        Self::setup_gpio(latch_pin)?;
+        let (setdata, clrdata, pin_bit) = Self::setup_gpio_mem(latch_pin)?;
 
         Ok(SPIButtonController {
             spi,
@@ -145,18 +150,58 @@ impl SPIButtonController {
             buttons,
             xmit_buf,
             scans: 0,
-            latch_pin,
+            setdata,
+            clrdata,
+            pin_bit,
         })
     }
-    fn setup_gpio(pin: u32) -> Result<(), Box<dyn std::error::Error>> {
-        fs::write("/sys/class/gpio/export", pin.to_string())?;
-        fs::write(format!("/sys/class/gpio/gpio{}/direction", pin), "out")?;
-        Ok(())
+    fn setup_gpio_mem(pin: u32) -> Result<(*mut u32, *mut u32, u32), Box<dyn std::error::Error>> {
+        let bank = pin / 32;
+        let bit = pin % 32;
+        let pin_bit = 1 << bit;
+        let base_addr = match bank {
+            0 => 0x44E07000,
+            1 => 0x4804C000,
+            2 => 0x481AC000,
+            3 => 0x481AE000,
+            _ => return Err("Invalid GPIO bank".into()),
+        };
+
+        let mem_file = File::open("/dev/mem")?;
+        let mem_fd = mem_file.as_raw_fd();
+        let gpio_base = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                0x1000,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_SHARED,
+                mem_fd,
+                base_addr as i64,
+            ) as *mut u8
+        };
+        if gpio_base == libc::MAP_FAILED as *mut u8 {
+            return Err("mmap failed".into());
+        }
+
+        let oe = (gpio_base as usize + 0x134) as *mut u32;
+        let setdata = (gpio_base as usize + 0x194) as *mut u32;
+        let clrdata = (gpio_base as usize + 0x190) as *mut u32;
+
+        // Set direction to output
+        unsafe {
+            let current_oe = ptr::read_volatile(oe);
+            ptr::write_volatile(oe, current_oe & !pin_bit);
+        }
+
+        Ok((setdata, clrdata, pin_bit))
     }
 
-    fn set_gpio(pin: u32, value: bool) -> Result<(), Box<dyn std::error::Error>> {
-        fs::write(format!("/sys/class/gpio/gpio{}/value", pin), if value { "1" } else { "0" })?;
-        Ok(())
+    fn set_gpio(&self, value: bool) {
+        if value {
+            unsafe { ptr::write_volatile(self.setdata, self.pin_bit); }
+        } else {
+            unsafe { ptr::write_volatile(self.clrdata, self.pin_bit); }
+        }
     }
     fn transfer(&mut self, data: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         let mut rx_buf = vec![0u8; data.len()];
@@ -244,10 +289,10 @@ impl SPIButtonController {
     fn loop_once(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let mut events = SPIButtonEvents::new();
         let xmit_data = self.xmit_buf.clone();
-        Self::set_gpio(self.latch_pin, false)?; // Latch low to read buttons
+        self.set_gpio(false); // Latch low to read buttons
         let rx_buf = self.transfer(&xmit_data)?;
         self.get_input_buffer(&rx_buf, &mut events);
-        Self::set_gpio(self.latch_pin, true)?;  // Latch high to end read 
+        self.set_gpio(true);  // Latch high to end read 
         self.set_output_buffer(); // Update for lights
         let xmit_data2 = self.xmit_buf.clone();
         let _ = self.transfer(&xmit_data2)?;
@@ -288,5 +333,51 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         controller.loop_once()?;
         std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_spi_button_new() {
+        let btn = SPIButton::new(SPIButtonState::On);
+        assert_eq!(btn.get_state(), SPIButtonState::On);
+        assert_eq!(btn.data, 0x01);
+    }
+
+    #[test]
+    fn test_spi_button_set_state() {
+        let mut btn = SPIButton::new(SPIButtonState::Off);
+        btn.set_state(SPIButtonState::On);
+        assert_eq!(btn.get_state(), SPIButtonState::On);
+    }
+
+    #[test]
+    fn test_spi_button_set_lamp() {
+        let mut btn = SPIButton::new(SPIButtonState::Off);
+        btn.set_lamp(true);
+        assert!(btn.is_lamp_on());
+        btn.set_lamp(false);
+        assert!(!btn.is_lamp_on());
+    }
+
+    #[test]
+    fn test_spi_button_toggle() {
+        let mut btn = SPIButton::new(SPIButtonState::Off);
+        btn.toggle();
+        assert_eq!(btn.get_state(), SPIButtonState::On);
+        btn.toggle();
+        assert_eq!(btn.get_state(), SPIButtonState::Off);
+    }
+
+    #[test]
+    fn test_spi_button_state_from_u8() {
+        assert_eq!(SPIButtonState::from_u8(0), SPIButtonState::Off);
+        assert_eq!(SPIButtonState::from_u8(1), SPIButtonState::On);
+        assert_eq!(SPIButtonState::from_u8(2), SPIButtonState::Flash1);
+        assert_eq!(SPIButtonState::from_u8(3), SPIButtonState::Flash2);
+        assert_eq!(SPIButtonState::from_u8(4), SPIButtonState::Off); // since & 0x03 == 0
     }
 }
