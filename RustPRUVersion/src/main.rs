@@ -129,7 +129,7 @@ impl SPIButtonController {
         let mut spi = Spidev::open("/dev/spidev1.0")?;
         let options = SpidevOptions::new()
             .bits_per_word(8)
-            .max_speed_hz(800_000)
+            .max_speed_hz(100_000)
             .mode(SpiModeFlags::SPI_MODE_0)
             .build();
         spi.configure(&options)?;
@@ -139,7 +139,7 @@ impl SPIButtonController {
         let buttons = vec![SPIButton::new(SPIButtonState::Off); button_count];
 
         // LAMP_LATCH_PIN equivalent: P8_19 GPIO22
-        let latch_pin = 22;
+        let latch_pin = 14;
         let (setdata, clrdata, pin_bit) = Self::setup_gpio_mem(latch_pin)?;
 
         Ok(SPIButtonController {
@@ -336,7 +336,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     loop {
         controller.loop_once()?;
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::sleep(std::time::Duration::from_millis(10));
     }
 }
 

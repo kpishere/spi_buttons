@@ -16,19 +16,19 @@ The implementation uses the Linux `spidev` interface to communicate with SPI shi
 Beaglebone Black Pinout (SPI via spidev)
 
 P8 Header:
-  19: GPIO22 (Lamp Latch) - Controls shift register latch for parallel load
-  11: SPI1_D1 (MOSI)      - Master Out Slave In (data to shift registers)
-  12: SPI1_SCLK (SCK)     - Serial Clock (SPI clock signal)
-  15: SPI1_D0 (MISO)      - Master In Slave Out (data from shift registers)
 
 P9 Header:
+  31: SPI1_SCLK (SCK)     - Serial Clock (SPI clock signal)
+  29: SPI1_D0 (MISO)      - Master In Slave Out (data from shift registers)
+  30: SPI1_D1 (MOSI)      - Master Out Slave In (data to shift registers)
   28: SPI1_CS0 (CS)       - Chip Select (enables SPI communication)
+  26: GPIO14 (Lamp Latch) - Controls shift register latch for parallel load
 
 Shift Register Connections:
-- Serial Data In  <- MOSI (P8_11)
-- Serial Clock    <- SCK (P8_12)
-- Latch Clock     <- GPIO22 (P8_19)
-- Serial Data Out -> MISO (P8_15)
+- Serial Data In  <- MOSI (P9_30)
+- Serial Clock    <- SCK (P9_31)
+- Latch Clock     <- GPIO14 (P9_26)
+- Serial Data Out -> MISO (P9_29)
 - Chip Select     <- CS (P9_28)
 
 Note:
