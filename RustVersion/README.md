@@ -64,6 +64,5 @@ cargo test
 ## Running
 
 1. Build the Rust program: `cargo build`
-2. Run as root (for /dev/mem access): `sudo cargo run`
 
-The program uses the SPI device at `/dev/spidev1.0` and GPIO68 for latch control via direct memory mapping.
+The program uses the SPI device at `/dev/spidev1.0`.
