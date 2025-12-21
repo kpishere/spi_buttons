@@ -1,6 +1,4 @@
 use spidev::{Spidev, SpidevOptions, SpiModeFlags, SpidevTransfer};
-use std::ptr;
-use std::ffi::CString;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(u8)]
@@ -119,9 +117,6 @@ struct SPIButtonController {
     buttons: Vec<SPIButton>,
     xmit_buf: Vec<u8>,
     scans: u32,
-    setdata: *mut u32,
-    clrdata: *mut u32,
-    pin_bit: u32,
 }
 
 impl SPIButtonController {
@@ -138,75 +133,15 @@ impl SPIButtonController {
         let xmit_buf = vec![0; bytes];
         let buttons = vec![SPIButton::new(SPIButtonState::Off); button_count];
 
-        // LAMP_LATCH_PIN equivalent: P8_19 GPIO22
-        let latch_pin = 14;
-        let (setdata, clrdata, pin_bit) = Self::setup_gpio_mem(latch_pin)?;
-
         Ok(SPIButtonController {
             spi,
             button_count,
             buttons,
             xmit_buf,
             scans: 0,
-            setdata,
-            clrdata,
-            pin_bit,
         })
     }
-    fn setup_gpio_mem(pin: u32) -> Result<(*mut u32, *mut u32, u32), Box<dyn std::error::Error>> {
-        let bank = pin / 32;
-        let bit = pin % 32;
-        let pin_bit = 1 << bit;
-        let base_addr = match bank {
-            0 => 0x44E0_7000,
-            1 => 0x4804_C000,
-            2 => 0x481A_C000,
-            3 => 0x481A_E000,
-            _ => return Err("Invalid GPIO bank".into()),
-        };
-        let reg_size = 0x1000;
 
-        let mem_file = CString::new("/dev/mem").unwrap();
-        let mem_fd = unsafe { libc::open(mem_file.as_ptr(), libc::O_RDWR) };
-        if mem_fd < 0 {
-            panic!("Cannot open memory device");
-        }
-        let gpio_base = unsafe {
-            libc::mmap(
-                std::ptr::null_mut(),
-                reg_size,
-                libc::PROT_READ | libc::PROT_WRITE,
-                libc::MAP_SHARED,
-                mem_fd,
-                base_addr,
-            ) as *mut u8
-        };
-        if gpio_base == libc::MAP_FAILED as *mut u8 {
-            return Err("mmap failed".into());
-        }
-        let gpio_oe_register: isize = 0x134;
-	let gpio_setdata: isize = 0x194;
-        let gpio_clrdata: isize = 0x190;
-        let oe = unsafe { gpio_base.offset(gpio_oe_register) as *mut u32};
-        let setdata = unsafe { gpio_base.offset(gpio_setdata) as *mut u32};
-        let clrdata = unsafe { gpio_base.offset(gpio_clrdata) as *mut u32};
-
-        // Set direction to output
-        unsafe {
-            let current_oe = ptr::read_volatile(oe);
-            ptr::write_volatile(oe, current_oe & !pin_bit);
-        }
-
-        Ok((setdata, clrdata, pin_bit))
-    }
-
-    fn set_gpio(&self, value: bool) {
-        if value {
-            unsafe { ptr::write_volatile(self.setdata, self.pin_bit); }
-        } else {
-            unsafe { ptr::write_volatile(self.clrdata, self.pin_bit); }
-        }
-    }
     fn transfer(&mut self, data: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         let mut rx_buf = vec![0u8; data.len()];
         let mut transfer = SpidevTransfer::read_write(data, rx_buf.as_mut_slice());
@@ -251,9 +186,9 @@ impl SPIButtonController {
             let bit_idx = b % 8;
             let btn_pressed = (self.xmit_buf[byte_idx] & (1 << bit_idx)) == 0; // High is un-pressed
             if (btn_pressed && !lamp_state) || (!btn_pressed && lamp_state) {
-                self.xmit_buf[byte_idx] |= 1 << bit_idx; // set bit (light off)
-            } else {
                 self.xmit_buf[byte_idx] &= !(1 << bit_idx); // clear bit (light on)
+            } else {
+                self.xmit_buf[byte_idx] |= 1 << bit_idx; // set bit (light off)
             }
         }
     }
@@ -271,9 +206,13 @@ impl SPIButtonController {
             let is_up = !btn_pressed && btn_pressed != btn.last_scan();
 
             // Update hold count
-            btn.scans_pressed = if btn_pressed { btn.scans_pressed + 1 } else { 0 };
+            if btn_pressed { btn.scans_pressed = btn.scans_pressed + 1 } else { btn.scans_pressed = 0 };
 
-            if btn.on_change() && (is_down || is_up) {
+            if btn.scans_pressed != 0 {
+                println!("{} {} {} {} {} {} {} {}", b, byte_idx, bit_idx, btn_pressed, is_hold, is_down, is_up, btn.scans_pressed);
+            }
+
+            if is_down || is_up {
                 btn.set_hold_event(false);
                 events.push(btn);
             }
@@ -293,13 +232,13 @@ impl SPIButtonController {
     fn loop_once(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let mut events = SPIButtonEvents::new();
         let xmit_data = self.xmit_buf.clone();
-        self.set_gpio(false); // Latch low to read buttons
+        println!("x:{:?}", xmit_data);
+
         let rx_buf = self.transfer(&xmit_data)?;
+        println!("r:{:?}", rx_buf);
+
         self.get_input_buffer(&rx_buf, &mut events);
-        self.set_gpio(true);  // Latch high to end read 
-        self.set_output_buffer(); // Update for lights
-        let xmit_data2 = self.xmit_buf.clone();
-        let _ = self.transfer(&xmit_data2)?;
+        self.set_output_buffer(); 
         for i in 0..events.len() {
             let b = events[i];
             println!("Button {}: State {:?}", b.id, b.get_state());
@@ -336,7 +275,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     loop {
         controller.loop_once()?;
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        std::thread::sleep(std::time::Duration::from_millis(100));
     }
 }
 

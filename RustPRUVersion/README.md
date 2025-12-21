@@ -4,11 +4,11 @@ This is a Rust re-implementation of the spi_buttons repository for Beaglebone Bl
 
 ## Overview
 
-The original project controls buttons with lights using SPI shift registers. This version implements the same logic in Rust, using the `spidev` library for SPI communication via the Linux SPI device driver. GPIO is used for the latch pin to control shift register parallel loading, accessed directly via memory-mapped I/O for improved performance.
+The original project controls buttons with lights using SPI shift registers. This version implements the same logic in Rust, using the `spidev` library for SPI communication via the Linux SPI device driver. 
 
 ## SPI Implementation
 
-The implementation uses the Linux `spidev` interface to communicate with SPI shift registers. The SPI peripheral handles the low-level pin toggling for SCK (clock), MOSI (data out), MISO (data in), and CS (chip select). GPIO is used for the latch signal to control when data is latched into the shift registers for parallel output.
+The implementation uses the Linux `spidev` interface to communicate with SPI shift registers. The SPI peripheral handles the low-level pin toggling for SCK (clock), MOSI (data out), MISO (data in), and CS (chip select). 
 
 ### Pin Usage Diagram
 
@@ -22,44 +22,26 @@ P9 Header:
   29: SPI1_D0 (MISO)      - Master In Slave Out (data from shift registers)
   30: SPI1_D1 (MOSI)      - Master Out Slave In (data to shift registers)
   28: SPI1_CS0 (CS)       - Chip Select (enables SPI communication)
-  26: GPIO14 (Lamp Latch) - Controls shift register latch for parallel load
 
 Shift Register Connections:
 - Serial Data In  <- MOSI (P9_30)
 - Serial Clock    <- SCK (P9_31)
-- Latch Clock     <- GPIO14 (P9_26)
 - Serial Data Out -> MISO (P9_29)
 - Chip Select     <- CS (P9_28)
-
-Note:
-- SPI pins are managed by the Linux SPI driver; GPIO68 is controlled via direct memory-mapped I/O access to /dev/mem.
-- You may want to disable the gpio driver since accessing registers directly by /dev/mem.  Add `blacklist omap_gpio' 
-  in /etc/modprobe.d/gpio-blacklist.conf
 ```
 
 ### SPI Pins Description
 
-- **MOSI (P8_11, SPI1_D1)**: Outputs serial data to the shift registers' data input.
-- **SCK (P8_12, SPI1_SCLK)**: Provides the clock signal for synchronizing data transfer.
-- **MISO (P8_15, SPI1_D0)**: Reads serial data from the shift registers' data output.
+- **MOSI (P9_30, SPI1_D1)**: Outputs serial data to the shift registers' data input.
+- **SCK (P9_31, SPI1_SCLK)**: Provides the clock signal for synchronizing data transfer.
+- **MISO (P9_29, SPI1_D0)**: Reads serial data from the shift registers' data output.
 - **CS (P9_28, SPI1_CS0)**: Chip select signal to enable/disable SPI communication.
-- **Lamp Latch (P8_19, GPIO22)**: GPIO-controlled pin to latch data into the shift registers for parallel output, accessed via direct memory mapping of GPIO registers.
 
 ## GPIO Access
-
-GPIO control has been updated to use direct memory-mapped I/O access via `/dev/mem` instead of the sysfs interface. This provides:
-
-- Lower latency for GPIO operations
-- Direct access to GPIO registers (GPIO_OE, GPIO_SETDATAOUT, GPIO_CLEARDATAOUT)
-- Atomic set/clear operations for better performance
-- Reduced overhead compared to file system operations
-
-The implementation maps the GPIO2 bank (containing GPIO68) and directly manipulates the hardware registers for pin control.
 
 ## Dependencies
 
 - `spidev`: For SPI communication via the Linux SPI device interface.
-- `libc`: For direct system calls including mmap.
 
 ## Building
 

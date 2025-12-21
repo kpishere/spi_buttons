@@ -17,14 +17,13 @@
 //   'remote' digital control and sensing.
 //
 // CLK  - Pin 52 - Button+Lamp Clock - Header pins 15,16
-// SS   - Pin 53 - Button P/S        - Header pin 14
+// CS   - Pin 53 - Button P/S        - Header pin 14,11,9
 // MOSI - Pin 51 - Lamp              - Header pin 13
 // MISO - Pin 50 - Button            - Header pin 12
 //
-// GND - Header pin 2
-// PWR - Header pin 6 - Lamps
-// N/C - Header pin 10 - Op-amp output
-// Pin 49 - Header pin 11 - Lamp strobe latch output
+// GND - Header pin 2,4
+// VDD - Header pin 5 - 3.3V or 5V
+// PWR - Header pin 6 - Lamps 5V (320ma max)
 ////
 
 void mySPIButtonEventHandler(SPIButtonController &controller, SPIButtonEvent events) {
