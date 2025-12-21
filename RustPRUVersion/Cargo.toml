@@ -6,5 +6,3 @@ edition = "2021"
 [dependencies]
 spidev = "0.5"
 rounded-div = "0.1.4"
-nix = { version = "0.27", features = ["fs", "mman"] }
-libc = "0.2"

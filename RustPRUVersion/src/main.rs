@@ -44,7 +44,10 @@ impl SPIButton {
     }
 
     fn get_state(&self) -> SPIButtonState {
-        SPIButtonState::from_u8(self.data)
+        SPIButtonState::from_u8(self.data & (SPIButtonState::Off as u8
+            | SPIButtonState::On as u8
+            | SPIButtonState::Flash1 as u8
+            | SPIButtonState::Flash2 as u8)) 
     }
 
     fn set_state(&mut self, state: SPIButtonState) {
@@ -53,7 +56,7 @@ impl SPIButton {
     }
 
     fn is_lamp_on(&self) -> bool {
-        (self.data & SPIButtonState::LampOn as u8) != 0
+        (self.data & SPIButtonState::LampOn as u8) == SPIButtonState::LampOn as u8
     }
 
     fn set_lamp(&mut self, on: bool) {
@@ -65,11 +68,11 @@ impl SPIButton {
     }
 
     fn do_toggle(&self) -> bool {
-        (self.data & SPIButtonState::Toggle as u8) != 0
+        (self.data & SPIButtonState::Toggle as u8) == SPIButtonState::Toggle as u8
     }
 
     fn last_scan(&self) -> bool {
-        (self.data & SPIButtonState::PressedLag1 as u8) != 0
+        (self.data & SPIButtonState::PressedLag1 as u8) == SPIButtonState::PressedLag1 as u8
     }
 
     fn set_last(&mut self, on: bool) {
@@ -89,7 +92,7 @@ impl SPIButton {
     }
 
     fn is_hold_event(&self) -> bool {
-        (self.data & SPIButtonState::HoldEvent as u8) != 0
+        (self.data & SPIButtonState::HoldEvent as u8) == SPIButtonState::HoldEvent as u8
     }
 
     fn set_hold_event(&mut self, on: bool) {
@@ -142,16 +145,37 @@ impl SPIButtonController {
         })
     }
 
+    fn reversebits(v:u8) -> u8{
+        (v & 0b00000001) << 7 
+        | (v & 0b00000010) << 5
+        | (v & 0b00000100) << 3
+        | (v & 0b00001000) << 1
+        | (v & 0b00010000) >> 1
+        | (v & 0b00100000) >> 3
+        | (v & 0b01000000) >> 5 
+        | (v & 0b10000000) >> 7
+    }
+    
     fn transfer(&mut self, data: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        let mut rx_buf = vec![0u8; data.len()];
-        let mut transfer = SpidevTransfer::read_write(data, rx_buf.as_mut_slice());
+        let mut rx_buf  = vec![0u8; data.len()];
+        let mut rx_rbuf = vec![0u8; data.len()];
+        let mut rdata = vec![0u8; data.len()];
+        for i in 0..data.len() {
+            rdata[i] = SPIButtonController::reversebits(data[i]);
+        }
+
+        let mut transfer = SpidevTransfer::read_write(rdata.as_slice(), rx_buf.as_mut_slice() );
         self.spi.transfer(&mut transfer)?;
-        Ok(rx_buf)
+
+        for i in 0..rx_buf.len() {
+            rx_rbuf[i] = SPIButtonController::reversebits(rx_buf[i]);
+        }
+        Ok(rx_rbuf)
     }
 
-    fn set_button(&mut self, pos: usize, mut button: SPIButton) {
-        button.id = pos as u8;
-        self.buttons[pos] = button;
+    fn set_button(&mut self, pos: u8, mut button: SPIButton) {
+        button.id = pos;
+        self.buttons[pos as usize] = button;
     }
 
     fn get_button(&self, pos: usize) -> SPIButton {
@@ -177,19 +201,16 @@ impl SPIButtonController {
                 }
                 _ => {}
             }
-            self.set_button(b, spi_btn);
-
             // For animation, lamp state is altered
-            let spi_btn = self.get_button(b);
             let lamp_state = spi_btn.is_lamp_on();
             let byte_idx = b / 8;
             let bit_idx = b % 8;
-            let btn_pressed = (self.xmit_buf[byte_idx] & (1 << bit_idx)) == 0; // High is un-pressed
-            if (btn_pressed && !lamp_state) || (!btn_pressed && lamp_state) {
-                self.xmit_buf[byte_idx] &= !(1 << bit_idx); // clear bit (light on)
+            if lamp_state {
+                self.xmit_buf[byte_idx] |= 1 << bit_idx; // set bit (light on)
             } else {
-                self.xmit_buf[byte_idx] |= 1 << bit_idx; // set bit (light off)
+                self.xmit_buf[byte_idx] &= !(1 << bit_idx); // clear bit (light off)
             }
+            self.set_button(b as u8, spi_btn);
         }
     }
 
@@ -208,11 +229,7 @@ impl SPIButtonController {
             // Update hold count
             if btn_pressed { btn.scans_pressed = btn.scans_pressed + 1 } else { btn.scans_pressed = 0 };
 
-            if btn.scans_pressed != 0 {
-                println!("{} {} {} {} {} {} {} {}", b, byte_idx, bit_idx, btn_pressed, is_hold, is_down, is_up, btn.scans_pressed);
-            }
-
-            if is_down || is_up {
+            if btn.on_change() && ( is_down || is_up ) {
                 btn.set_hold_event(false);
                 events.push(btn);
             }
@@ -225,37 +242,32 @@ impl SPIButtonController {
                 btn.toggle();
             }
             btn.set_last(btn_pressed);
-            self.set_button(b, btn);
+            self.set_button(b as u8, btn);
         }
     }
 
     fn loop_once(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let mut events = SPIButtonEvents::new();
         let xmit_data = self.xmit_buf.clone();
-        println!("x:{:?}", xmit_data);
-
         let rx_buf = self.transfer(&xmit_data)?;
-        println!("r:{:?}", rx_buf);
-
         self.get_input_buffer(&rx_buf, &mut events);
-        self.set_output_buffer(); 
         for i in 0..events.len() {
-            let b = events[i];
+            let mut b = events[i];
             println!("Button {}: State {:?}", b.id, b.get_state());
             if b.is_hold_event() {
-                let mut btn = self.get_button(b.id as usize);
-                match btn.get_state() {
-                    SPIButtonState::Off => btn.set_state(SPIButtonState::On),
-                    SPIButtonState::On => btn.set_state(SPIButtonState::Flash1),
-                    SPIButtonState::Flash1 => btn.set_state(SPIButtonState::Flash2),
-                    SPIButtonState::Flash2 => btn.set_state(SPIButtonState::Off),
+                match b.get_state() {
+                    SPIButtonState::Off => b.set_state(SPIButtonState::On),
+                    SPIButtonState::On => b.set_state(SPIButtonState::Flash1),
+                    SPIButtonState::Flash1 => b.set_state(SPIButtonState::Flash2),
+                    SPIButtonState::Flash2 => b.set_state(SPIButtonState::Off),
                     _ => {}
                 }
-                btn.scans_pressed = 0;
-                self.set_button(b.id as usize, btn);
+                b.scans_pressed = 0;
+                self.set_button(b.id, b);
             }
         }
         self.scans += 1;
+        self.set_output_buffer(); 
         Ok(())
     }
 }
