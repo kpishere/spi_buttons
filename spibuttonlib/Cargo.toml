@@ -1,0 +1,11 @@
+[package]
+name = "spibuttonlib"
+version = "0.1.0"
+edition = "2024"
+authors = ["Kevin Peck"]
+description = "SPI button library for lamp-buttons with MC14021B and MC14094B or equivilant shift registers."
+license = ""
+
+[dependencies]
+spidev = "0.7.1"
+rounded-div = "0.1.4"
