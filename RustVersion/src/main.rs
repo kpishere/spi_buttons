@@ -3,7 +3,7 @@ use spibuttonlib::{SPIButtonController, SPIButtonState, SPIButton};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Initializing SPI Buttons Controller on Beaglebone Black...");
 
-    let mut controller = SPIButtonController::new(20, 800_000)?;
+    let mut controller = SPIButtonController::new(20, "/dev/spidev1.0", 800_000)?;
 
     // Set default buttons
     for i in 0..20 {

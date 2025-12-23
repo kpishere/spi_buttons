@@ -131,8 +131,8 @@ pub struct SPIButtonController {
 }
 
 impl SPIButtonController {
-    pub fn new(button_count: usize, bus_speed: u32) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut spi = Spidev::open("/dev/spidev1.0")?;
+    pub fn new(button_count: usize, spidev: &str,  bus_speed: u32) -> Result<Self, Box<dyn std::error::Error>> {
+        let mut spi = Spidev::open(spidev)?;
         let options = SpidevOptions::new()
             .bits_per_word(8)
             .max_speed_hz(bus_speed)
