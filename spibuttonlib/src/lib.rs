@@ -131,12 +131,19 @@ pub struct SPIButtonController {
 }
 
 impl SPIButtonController {
-    pub fn new(button_count: usize, spidev: &str,  bus_speed: u32) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(button_count: usize, spidev: &str,  bus_speed: u32, mode: u8) -> Result<Self, Box<dyn std::error::Error>> {
         let mut spi = Spidev::open(spidev)?;
-        let options = SpidevOptions::new()
+        let modeval = match mode {
+	    0 => SpiModeFlags::SPI_MODE_0,
+	    1 => SpiModeFlags::SPI_MODE_1,
+	    2 => SpiModeFlags::SPI_MODE_2,
+	    3 => SpiModeFlags::SPI_MODE_2,
+	    _ => panic!("Invalid SPI mode in config"),
+	}; 
+	let options = SpidevOptions::new()
             .bits_per_word(8)
             .max_speed_hz(bus_speed)
-            .mode(SpiModeFlags::SPI_MODE_0)
+            .mode(modeval)
             .build();
         spi.configure(&options)?;
 
